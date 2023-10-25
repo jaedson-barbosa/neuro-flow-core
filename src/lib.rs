@@ -117,13 +117,10 @@
 #![no_std]
 
 extern crate heapless;
-extern crate rand;
 extern crate serde;
 
-#[macro_use]
-extern crate serde_derive;
-
 use heapless::Vec;
+use serde::{Serialize, Deserialize};
 
 /// Struct `Layer` represents single layer of network.
 /// It is private and should not be used directly.
@@ -204,7 +201,10 @@ pub struct FeedForward {
 }
 
 impl Layer {
-    fn new(amount: i32, input: i32) -> Layer {
+    fn new<F>(amount: i32, input: i32, rand: F) -> Layer
+    where
+        F: Fn() -> f64,
+    {
         let mut nl = Layer {
             v: Vec::new(),
             y: Vec::new(),
@@ -220,7 +220,7 @@ impl Layer {
 
             v = Vec::new();
             for _ in 0..input + 1 {
-                v.push(2f64 * rand::random::<f64>() - 1f64).unwrap();
+                v.push(2f64 * rand() - 1f64).unwrap();
             }
 
             nl.w.push(v).unwrap();
@@ -247,7 +247,10 @@ impl FeedForward {
     /// let mut nn = FeedForward::new(&[1, 3, 2]);
     /// ```
     ///
-    pub fn new(architecture: &[i32]) -> FeedForward {
+    pub fn new<F>(architecture: &[i32], rand: F) -> FeedForward
+    where
+        F: Fn() -> f64,
+    {
         let mut nn = FeedForward {
             learn_rate: 0.1,
             momentum: 0.1,
@@ -258,7 +261,7 @@ impl FeedForward {
 
         for i in 1..architecture.len() {
             nn.layers
-                .push(Layer::new(architecture[i], architecture[i - 1]))
+                .push(Layer::new(architecture[i], architecture[i - 1], &rand))
                 .unwrap();
         }
 
@@ -310,7 +313,8 @@ impl FeedForward {
                 for i in 0..self.layers[j].y.len() {
                     self.layers[j].delta[i] =
                         (d[i] - self.layers[j].y[i]) * self.act_type.der(self.layers[j].v[i]);
-                    self.error += 0.5 * (d[i] - self.layers[j].y[i]).powi(2);
+                    let temp = d[i] - self.layers[j].y[i];
+                    self.error += 0.5 * temp * temp;
                 }
             } else {
                 for i in 0..self.layers[j].delta.len() {
@@ -422,27 +426,32 @@ impl FeedForward {
 pub enum ActivatorType {
     Sigmoid,
     Tanh,
-    Relu
+    Relu,
 }
 
 impl ActivatorType {
     pub fn func(&self, x: f64) -> f64 {
         match self {
-            Self::Sigmoid => 1.0 / (1.0 + x.exp()),
-            Self::Tanh => x.tanh(),
-            Self::Relu => f64::max(0.0, x)
+            Self::Sigmoid => 1.0 / (1.0 + libm::exp(x)),
+            Self::Tanh => libm::tanh(x),
+            Self::Relu => f64::max(0.0, x),
         }
     }
 
     pub fn der(&self, x: f64) -> f64 {
         match self {
             Self::Sigmoid => self.func(x) * (1.0 - self.func(x)),
-            Self::Tanh => 1.0 - x.tanh().powi(2),
-            Self::Relu => if x <= 0.0 {
-                0.0
-            } else {
-                1.0
-            },
+            Self::Tanh => {
+                let temp = self.func(x);
+                1.0 - temp * temp
+            }
+            Self::Relu => {
+                if x <= 0.0 {
+                    0.0
+                } else {
+                    1.0
+                }
+            }
         }
     }
 }
