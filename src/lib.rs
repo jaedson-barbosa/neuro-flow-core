@@ -114,33 +114,16 @@
 //! ```
 //!
 
-pub mod activators;
-pub mod estimators;
-pub mod data;
-pub mod io;
+#![no_std]
 
+extern crate heapless;
 extern crate rand;
 extern crate serde;
-extern crate serde_json;
-extern crate bincode;
-extern crate csv;
 
 #[macro_use]
 extern crate serde_derive;
 
-use std::fmt;
-use std::default::Default;
-
-use data::Extractable;
-
-/// Custom ErrorKind enum for handling multiple error types
-#[derive(Debug)]
-pub enum ErrorKind {
-    IO(std::io::Error),
-    Encoding(bincode::Error),
-    Json(serde_json::Error),
-    StdError(Box<dyn std::error::Error>)
-}
+use heapless::Vec;
 
 /// The struct that points different fields of network.
 /// It is used only for Display trait. Should be deleted in future versions
@@ -149,7 +132,7 @@ enum Field {
     Induced,
     Y,
     Deltas,
-    Weights
+    Weights,
 }
 
 /// This trait should be implemented by neural network structure when you want it
@@ -160,31 +143,31 @@ enum Field {
 /// Necessity of this trait can be easily described when you restore `FeedForward` instance
 /// by `neuroflow::io::load` function. It calls `after` method in order to adjust
 /// activation function of neural network.
-pub trait Transform: serde::Serialize + for <'de> serde::Deserialize<'de>{
+pub trait Transform: serde::Serialize + for<'de> serde::Deserialize<'de> {
     /// The method that should be called before neural network transformation
-    fn before(&mut self){}
+    fn before(&mut self) {}
 
     /// The method that should be called after neural network transformation
-    fn after(&mut self){}
+    fn after(&mut self) {}
 }
 
 /// Struct `Layer` represents single layer of network.
 /// It is private and should not be used directly.
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 struct Layer {
-    v: Vec<f64>,
-    y: Vec<f64>,
-    delta: Vec<f64>,
-    prev_delta: Vec<f64>,
-    w: Vec<Vec<f64>>,
+    v: Vec<f64, 32>,
+    y: Vec<f64, 32>,
+    delta: Vec<f64, 32>,
+    prev_delta: Vec<f64, 32>,
+    w: Vec<Vec<f64, 32>, 32>,
 }
 
 /// This struct is a container for chosen activation function and its derivative.
 /// It is useful when in network's serialization in order to skip function
 /// in serialization
-struct ActivationContainer{
+struct ActivationContainer {
     func: fn(f64) -> f64,
-    der: fn(f64) -> f64
+    der: fn(f64) -> f64,
 }
 
 /// Feed Forward (multilayer perceptron) neural network that is trained
@@ -247,7 +230,7 @@ struct ActivationContainer{
 ///
 #[derive(Serialize, Deserialize)]
 pub struct FeedForward {
-    layers: Vec<Layer>,
+    layers: Vec<Layer, 32>,
     learn_rate: f64,
     momentum: f64,
     error: f64,
@@ -255,43 +238,49 @@ pub struct FeedForward {
     act_type: activators::Type,
 
     #[serde(skip_deserializing, skip_serializing)]
-    act: ActivationContainer
+    act: ActivationContainer,
 }
 
 impl Layer {
     fn new(amount: i32, input: i32) -> Layer {
-        let mut nl = Layer {v: vec![], y: vec![], delta: vec![], prev_delta: vec![], w: Vec::new()};
-        let mut v: Vec<f64>;
+        let mut nl = Layer {
+            v: Vec::new(),
+            y: Vec::new(),
+            delta: Vec::new(),
+            prev_delta: Vec::new(),
+            w: Vec::new(),
+        };
+        let mut v: Vec<f64, 32>;
         for _ in 0..amount {
-            nl.y.push(0.0);
-            nl.delta.push(0.0);
-            nl.v.push(0.0);
+            nl.y.push(0.0).unwrap();
+            nl.delta.push(0.0).unwrap();
+            nl.v.push(0.0).unwrap();
 
             v = Vec::new();
-            for _ in 0..input + 1{
-                v.push(2f64 * rand::random::<f64>() - 1f64);
+            for _ in 0..input + 1 {
+                v.push(2f64 * rand::random::<f64>() - 1f64).unwrap();
             }
 
-            nl.w.push(v);
+            nl.w.push(v).unwrap();
         }
         return nl;
     }
 
-    fn bind(&mut self, index: usize){
-        self.v.insert(index, 0.0);
-        self.y.insert(index, 0.0);
-        self.delta.insert(index, 0.0);
+    fn bind(&mut self, index: usize) {
+        self.v.insert(index, 0.0).unwrap();
+        self.y.insert(index, 0.0).unwrap();
+        self.delta.insert(index, 0.0).unwrap();
 
-        let mut v: Vec<f64> = Vec::new();
+        let mut v: Vec<f64, 32> = Vec::new();
         let len = self.w[index].len();
 
-        for _ in 0..len{
-            v.push(2f64 * rand::random::<f64>() - 1f64);
+        for _ in 0..len {
+            v.push(2f64 * rand::random::<f64>() - 1f64).unwrap();
         }
-        self.w.insert(index, v);
+        self.w.insert(index, v).unwrap();
     }
 
-    fn unbind(&mut self, index: usize){
+    fn unbind(&mut self, index: usize) {
         self.v.remove(index);
         self.y.remove(index);
         self.delta.remove(index);
@@ -318,46 +307,53 @@ impl FeedForward {
     /// ```
     ///
     pub fn new(architecture: &[i32]) -> FeedForward {
-        let mut nn = FeedForward {learn_rate: 0.1, momentum: 0.1, error: 0.0,
+        let mut nn = FeedForward {
+            learn_rate: 0.1,
+            momentum: 0.1,
+            error: 0.0,
             layers: Vec::new(),
-            act: ActivationContainer{func: activators::tanh, der: activators::der_tanh},
-            act_type: activators::Type::Tanh};
+            act: ActivationContainer {
+                func: activators::tanh,
+                der: activators::der_tanh,
+            },
+            act_type: activators::Type::Tanh,
+        };
 
         for i in 1..architecture.len() {
-            nn.layers.push(Layer::new(architecture[i], architecture[i - 1]))
+            nn.layers
+                .push(Layer::new(architecture[i], architecture[i - 1]))
+                .unwrap();
         }
 
         return nn;
     }
 
-    fn forward(&mut self, x: &Vec<f64>){
+    fn forward(&mut self, x: &Vec<f64, 32>) {
         let mut sum: f64;
 
-        for j in 0..self.layers.len(){
-            if j == 0{
-                for i in 0..self.layers[j].v.len(){
+        for j in 0..self.layers.len() {
+            if j == 0 {
+                for i in 0..self.layers[j].v.len() {
                     sum = 0.0;
-                    for k in 0..x.len(){
+                    for k in 0..x.len() {
                         sum += self.layers[j].w[i][k] * x[k];
                     }
                     self.layers[j].v[i] = sum;
                     self.layers[j].y[i] = (self.act.func)(sum);
                 }
-            }
-            else if j == self.layers.len() - 1{
-                for i in 0..self.layers[j].v.len(){
+            } else if j == self.layers.len() - 1 {
+                for i in 0..self.layers[j].v.len() {
                     sum = self.layers[j].w[i][0];
-                    for k in 0..self.layers[j - 1].y.len(){
+                    for k in 0..self.layers[j - 1].y.len() {
                         sum += self.layers[j].w[i][k + 1] * self.layers[j - 1].y[k];
                     }
                     self.layers[j].v[i] = sum;
                     self.layers[j].y[i] = sum;
                 }
-            }
-            else {
-                for i in 0..self.layers[j].v.len(){
+            } else {
+                for i in 0..self.layers[j].v.len() {
                     sum = self.layers[j].w[i][0];
-                    for k in 0..self.layers[j - 1].y.len(){
+                    for k in 0..self.layers[j - 1].y.len() {
                         sum += self.layers[j].w[i][k + 1] * self.layers[j - 1].y[k];
                     }
                     self.layers[j].v[i] = sum;
@@ -367,21 +363,22 @@ impl FeedForward {
         }
     }
 
-    fn backward(&mut self, d: &Vec<f64>){
+    fn backward(&mut self, d: &Vec<f64, 32>) {
         let mut sum: f64;
 
-        for j in (0..self.layers.len()).rev(){
+        for j in (0..self.layers.len()).rev() {
             self.layers[j].prev_delta = self.layers[j].delta.clone();
-            if j == self.layers.len() - 1{
+            if j == self.layers.len() - 1 {
                 self.error = 0.0;
-                for i in 0..self.layers[j].y.len(){
-                    self.layers[j].delta[i] = (d[i] - self.layers[j].y[i])* (self.act.der)(self.layers[j].v[i]);
+                for i in 0..self.layers[j].y.len() {
+                    self.layers[j].delta[i] =
+                        (d[i] - self.layers[j].y[i]) * (self.act.der)(self.layers[j].v[i]);
                     self.error += 0.5 * (d[i] - self.layers[j].y[i]).powi(2);
                 }
             } else {
-                for i in 0..self.layers[j].delta.len(){
+                for i in 0..self.layers[j].delta.len() {
                     sum = 0.0;
-                    for k in 0..self.layers[j + 1].delta.len(){
+                    for k in 0..self.layers[j + 1].delta.len() {
                         sum += self.layers[j + 1].delta[k] * self.layers[j + 1].w[k][i + 1];
                     }
                     self.layers[j].delta[i] = (self.act.der)(self.layers[j].v[i]) * sum;
@@ -390,17 +387,19 @@ impl FeedForward {
         }
     }
 
-    fn update(&mut self, x: &Vec<f64>){
-        for j in 0..self.layers.len(){
-            for i in 0..self.layers[j].w.len(){
-                for k in 0..self.layers[j].w[i].len(){
+    fn update(&mut self, x: &Vec<f64, 32>) {
+        for j in 0..self.layers.len() {
+            for i in 0..self.layers[j].w.len() {
+                for k in 0..self.layers[j].w[i].len() {
                     if j == 0 {
-                        self.layers[j].w[i][k] += self.learn_rate * self.layers[j].delta[i]*x[k];
+                        self.layers[j].w[i][k] += self.learn_rate * self.layers[j].delta[i] * x[k];
                     } else {
-                        if k == 0{
+                        if k == 0 {
                             self.layers[j].w[i][k] += self.learn_rate * self.layers[j].delta[i];
                         } else {
-                            self.layers[j].w[i][k] += self.learn_rate * self.layers[j].delta[i]*self.layers[j - 1].y[k - 1];
+                            self.layers[j].w[i][k] += self.learn_rate
+                                * self.layers[j].delta[i]
+                                * self.layers[j - 1].y[k - 1];
                         }
                     }
                     self.layers[j].w[i][k] += self.momentum * self.layers[j].prev_delta[i];
@@ -422,7 +421,7 @@ impl FeedForward {
     /// # let mut nn = FeedForward::new(&[1, 3, 2]);
     /// nn.bind(2, 0);
     /// ```
-    pub fn bind(&mut self, layer: usize, neuron: usize){
+    pub fn bind(&mut self, layer: usize, neuron: usize) {
         self.layers[layer - 1].bind(neuron);
     }
 
@@ -438,7 +437,7 @@ impl FeedForward {
     /// # let mut nn = FeedForward::new(&[1, 3, 2]);
     /// nn.unbind(2, 0);
     /// ```
-    pub fn unbind(&mut self, layer: usize, neuron: usize){
+    pub fn unbind(&mut self, layer: usize, neuron: usize) {
         self.layers[layer - 1].unbind(neuron);
     }
 
@@ -456,9 +455,12 @@ impl FeedForward {
     /// d.push(&[1.2], &[1.3, -0.2]);
     /// nn.train(&d, 30_000);
     /// ```
-    pub fn train<T>(&mut self, data: &T, iterations: i64) where T: Extractable{
-        for _ in 0..iterations{
-            let (x, y) = data.rand();
+    pub fn train<'a, F, const N: usize, const M: usize>(&mut self, rand: F, iterations: i64)
+    where
+        F: Fn() -> ([f64; N], [f64; M]),
+    {
+        for _ in 0..iterations {
+            let (x, y) = rand();
             self.fit(&x, &y);
         }
     }
@@ -476,11 +478,11 @@ impl FeedForward {
     /// nn.fit(&[3.0], &[3.0, 5.0]);
     /// ```
     #[allow(non_snake_case)]
-    pub fn fit(&mut self, X: &[f64], d: &[f64]){
-        let mut x = X.to_vec();
-        let res = d.to_vec();
+    pub fn fit(&mut self, X: &[f64], d: &[f64]) {
+        let mut x = Vec::from_slice(X).unwrap();
+        let res = Vec::from_slice(d).unwrap();
 
-        x.insert(0, 1f64);
+        x.insert(0, 1f64).unwrap();
 
         self.forward(&x);
         self.backward(&res);
@@ -500,10 +502,10 @@ impl FeedForward {
     /// let v: Vec<f64> = nn.calc(&[1.02]).to_vec();
     /// ```
     #[allow(non_snake_case)]
-    pub fn calc(&mut self, X: &[f64]) -> &[f64]{
-        let mut x = X.to_vec();
+    pub fn calc(&mut self, X: &[f64]) -> &[f64] {
+        let mut x = Vec::from_slice(X).unwrap();
 
-        x.insert(0, 1f64);
+        x.insert(0, 1f64).unwrap();
 
         self.forward(&x);
         &self.layers[self.layers.len() - 1].y
@@ -516,8 +518,8 @@ impl FeedForward {
     /// * `func: neuroflow::activators::Type` - enum element that indicates which
     /// function to use;
     /// * `return -> &mut FeedForward` - link on the current struct.
-    pub fn activation(&mut self, func: activators::Type) -> &mut FeedForward{
-        match func{
+    pub fn activation(&mut self, func: activators::Type) -> &mut FeedForward {
+        match func {
             activators::Type::Sigmoid => {
                 self.act_type = activators::Type::Sigmoid;
                 self.act.func = activators::sigm;
@@ -565,7 +567,11 @@ impl FeedForward {
     /// let mut nn = FeedForward::new(&[1, 3, 2]);
     /// nn.custom_activation(sigmoid, der_sigmoid);
     /// ```
-    pub fn custom_activation(&mut self, func: fn(f64) -> f64, der: fn(f64) -> f64) -> &mut FeedForward{
+    pub fn custom_activation(
+        &mut self,
+        func: fn(f64) -> f64,
+        der: fn(f64) -> f64,
+    ) -> &mut FeedForward {
         self.act_type = activators::Type::Custom;
 
         self.act.func = func;
@@ -611,13 +617,13 @@ impl FeedForward {
     /// Get current training error
     ///
     /// * `return -> f64` - training error
-    pub fn get_error(&self) -> f64{
+    pub fn get_error(&self) -> f64 {
         self.error
     }
 }
 
-impl Transform for FeedForward{
-    fn after(&mut self){
+impl Transform for FeedForward {
+    fn after(&mut self) {
         match self.act_type {
             activators::Type::Sigmoid => {
                 self.act_type = activators::Type::Sigmoid;
@@ -638,54 +644,71 @@ impl Transform for FeedForward{
     }
 }
 
-impl Default for ActivationContainer{
+impl Default for ActivationContainer {
     fn default() -> ActivationContainer {
-        ActivationContainer{func: activators::tanh, der: activators::der_tanh}
+        ActivationContainer {
+            func: activators::tanh,
+            der: activators::der_tanh,
+        }
     }
 }
 
-impl fmt::Display for FeedForward {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result{
-        let mut buf: String = format!("**Induced field**\n");
+pub mod activators {
+    //! Module contains popular neural networks activation functions
+    //! and theirs derivatives
 
-        for v in self.layers.iter(){
-            for val in v.v.iter(){
-                buf += &format!("{:.3} ", val);
-            }
-            buf += "\n";
+    /// Determine types of activation functions contained in this module.
+    #[allow(dead_code)]
+    #[derive(Serialize, Deserialize)]
+    pub enum Type {
+        Sigmoid,
+        Tanh,
+        Relu,
+        Custom,
+    }
+
+    pub fn sigm(x: f64) -> f64 {
+        1.0 / (1.0 + x.exp())
+    }
+    pub fn der_sigm(x: f64) -> f64 {
+        sigm(x) * (1.0 - sigm(x))
+    }
+
+    pub fn tanh(x: f64) -> f64 {
+        x.tanh()
+    }
+
+    pub fn der_tanh(x: f64) -> f64 {
+        1.0 - x.tanh().powi(2)
+    }
+
+    pub fn relu(x: f64) -> f64 {
+        f64::max(0.0, x)
+    }
+    pub fn der_relu(x: f64) -> f64 {
+        if x <= 0.0 {
+            0.0
+        } else {
+            1.0
         }
-        buf += "\n";
+    }
+}
 
-        buf += "**Activated field**\n";
-        for v in self.layers.iter(){
-            for val in v.y.iter(){
-                buf += &format!("{:.3} ", val);
-            }
-            buf += "\n";
-        }
-        buf += "\n";
+pub mod estimators {
+    /// # Widrow's rule of thumb
+    /// This is an empirical rule that shows the size of training sample
+    /// in order to get good generalization.
+    /// ## Example
+    /// For network architecture [2, 1] and allowed error 0.1 (10%)
+    /// the size of training sample must exceed the amount of free
+    /// network parameters in 10 times
+    pub fn widrows(architecture: &[i32], allowed_error: f64) -> f64 {
+        let mut s = architecture[0] * (architecture[0] + 1);
 
-        buf += "**Deltas**\n";
-        for v in self.layers.iter(){
-            for val in v.delta.iter(){
-                buf += &format!("{:.3} ", val);
-            }
-            buf += "\n";
-        }
-        buf += "\n";
-
-        buf += "**Weights**\n";
-        for v in self.layers.iter() {
-            for val in v.w.iter() {
-                buf += "[";
-                for cell in val.iter() {
-                    buf += &format!("{:.3} ", cell);
-                }
-                buf += "]";
-            }
-            buf += "\n";
+        for i in 1..architecture.len() {
+            s += architecture[i] * architecture[i - 1] + architecture[i];
         }
 
-        buf.fmt(f)
+        (s as f64) / allowed_error
     }
 }
