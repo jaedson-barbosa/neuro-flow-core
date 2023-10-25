@@ -3,11 +3,9 @@ extern crate time;
 extern crate rand;
 
 use neuroflow::FeedForward;
-
 use rand::{thread_rng, Rng};
 use rand::distributions::Uniform;
 use neuroflow::estimators;
-
 
 #[test]
 fn xor(){
@@ -24,7 +22,8 @@ fn xor(){
     let mut k;
     let mut rnd_range = thread_rng();
 
-    nn.learning_rate(0.1).momentum(0.01);
+    nn.learn_rate = 0.1;
+    nn.momentum = 0.01;
     for _ in 0..30_000{
         k = rnd_range.sample(Uniform::new(0, sc.len()));
         nn.fit(sc[k].0, sc[k].1);
@@ -43,27 +42,6 @@ fn xor(){
 
     println!("\nSpend time: {:.5}", (time::now_utc() - prev));
     assert!(true);
-}
-
-#[test]
-fn custom_activation(){
-    fn func(_x: f64) -> f64{
-        0.0
-    }
-
-    fn der_func(_x: f64) -> f64{
-        0.0
-    }
-
-    let mut nn = FeedForward::new(&[1, 2, 1]);
-    nn.custom_activation(func, der_func);
-
-    let before_fit: f64 = nn.calc(&[3.2])[0];
-
-    nn.fit(&[1.0], &[2.1]);
-
-    let after_fit: f64 = nn.calc(&[2.1])[0];
-    assert_eq!(before_fit, after_fit);
 }
 
 #[test]

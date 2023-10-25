@@ -125,32 +125,6 @@ extern crate serde_derive;
 
 use heapless::Vec;
 
-/// The struct that points different fields of network.
-/// It is used only for Display trait. Should be deleted in future versions
-#[allow(dead_code)]
-enum Field {
-    Induced,
-    Y,
-    Deltas,
-    Weights,
-}
-
-/// This trait should be implemented by neural network structure when you want it
-/// to be transformable to other formats. `Note` that you, also, need to implement
-/// `serde::Serialize` and `serde::Deserialize` traits before. Hopefully you can
-/// do it easily with `derive` attribute.
-///
-/// Necessity of this trait can be easily described when you restore `FeedForward` instance
-/// by `neuroflow::io::load` function. It calls `after` method in order to adjust
-/// activation function of neural network.
-pub trait Transform: serde::Serialize + for<'de> serde::Deserialize<'de> {
-    /// The method that should be called before neural network transformation
-    fn before(&mut self) {}
-
-    /// The method that should be called after neural network transformation
-    fn after(&mut self) {}
-}
-
 /// Struct `Layer` represents single layer of network.
 /// It is private and should not be used directly.
 #[derive(Serialize, Deserialize, Debug)]
@@ -160,14 +134,6 @@ struct Layer {
     delta: Vec<f64, 32>,
     prev_delta: Vec<f64, 32>,
     w: Vec<Vec<f64, 32>, 32>,
-}
-
-/// This struct is a container for chosen activation function and its derivative.
-/// It is useful when in network's serialization in order to skip function
-/// in serialization
-struct ActivationContainer {
-    func: fn(f64) -> f64,
-    der: fn(f64) -> f64,
 }
 
 /// Feed Forward (multilayer perceptron) neural network that is trained
@@ -231,14 +197,10 @@ struct ActivationContainer {
 #[derive(Serialize, Deserialize)]
 pub struct FeedForward {
     layers: Vec<Layer, 32>,
-    learn_rate: f64,
-    momentum: f64,
-    error: f64,
-
-    act_type: activators::Type,
-
-    #[serde(skip_deserializing, skip_serializing)]
-    act: ActivationContainer,
+    pub learn_rate: f64,
+    pub momentum: f64,
+    pub error: f64,
+    pub act_type: ActivatorType,
 }
 
 impl Layer {
@@ -264,27 +226,6 @@ impl Layer {
             nl.w.push(v).unwrap();
         }
         return nl;
-    }
-
-    fn bind(&mut self, index: usize) {
-        self.v.insert(index, 0.0).unwrap();
-        self.y.insert(index, 0.0).unwrap();
-        self.delta.insert(index, 0.0).unwrap();
-
-        let mut v: Vec<f64, 32> = Vec::new();
-        let len = self.w[index].len();
-
-        for _ in 0..len {
-            v.push(2f64 * rand::random::<f64>() - 1f64).unwrap();
-        }
-        self.w.insert(index, v).unwrap();
-    }
-
-    fn unbind(&mut self, index: usize) {
-        self.v.remove(index);
-        self.y.remove(index);
-        self.delta.remove(index);
-        self.w.remove(index);
     }
 }
 
@@ -312,11 +253,7 @@ impl FeedForward {
             momentum: 0.1,
             error: 0.0,
             layers: Vec::new(),
-            act: ActivationContainer {
-                func: activators::tanh,
-                der: activators::der_tanh,
-            },
-            act_type: activators::Type::Tanh,
+            act_type: ActivatorType::Tanh,
         };
 
         for i in 1..architecture.len() {
@@ -339,7 +276,7 @@ impl FeedForward {
                         sum += self.layers[j].w[i][k] * x[k];
                     }
                     self.layers[j].v[i] = sum;
-                    self.layers[j].y[i] = (self.act.func)(sum);
+                    self.layers[j].y[i] = self.act_type.func(sum);
                 }
             } else if j == self.layers.len() - 1 {
                 for i in 0..self.layers[j].v.len() {
@@ -357,7 +294,7 @@ impl FeedForward {
                         sum += self.layers[j].w[i][k + 1] * self.layers[j - 1].y[k];
                     }
                     self.layers[j].v[i] = sum;
-                    self.layers[j].y[i] = (self.act.func)(sum);
+                    self.layers[j].y[i] = self.act_type.func(sum);
                 }
             }
         }
@@ -372,7 +309,7 @@ impl FeedForward {
                 self.error = 0.0;
                 for i in 0..self.layers[j].y.len() {
                     self.layers[j].delta[i] =
-                        (d[i] - self.layers[j].y[i]) * (self.act.der)(self.layers[j].v[i]);
+                        (d[i] - self.layers[j].y[i]) * self.act_type.der(self.layers[j].v[i]);
                     self.error += 0.5 * (d[i] - self.layers[j].y[i]).powi(2);
                 }
             } else {
@@ -381,7 +318,7 @@ impl FeedForward {
                     for k in 0..self.layers[j + 1].delta.len() {
                         sum += self.layers[j + 1].delta[k] * self.layers[j + 1].w[k][i + 1];
                     }
-                    self.layers[j].delta[i] = (self.act.der)(self.layers[j].v[i]) * sum;
+                    self.layers[j].delta[i] = self.act_type.der(self.layers[j].v[i]) * sum;
                 }
             }
         }
@@ -408,39 +345,6 @@ impl FeedForward {
         }
     }
 
-    /// Bind a new neuron to layer. It initializes neuron with
-    /// random weights.
-    ///
-    /// * `layer: usize` - index of layer. NOTE, layer indexing starts from 1!
-    /// * `neuron: usize` - index of neuron. NOTE, neurons indexing in layer starts from 0!
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// # use neuroflow::FeedForward;
-    /// # let mut nn = FeedForward::new(&[1, 3, 2]);
-    /// nn.bind(2, 0);
-    /// ```
-    pub fn bind(&mut self, layer: usize, neuron: usize) {
-        self.layers[layer - 1].bind(neuron);
-    }
-
-    /// Unbind neuron from layer.
-    ///
-    /// * `layer: usize` - index of layer. NOTE, layer indexing starts from 1!
-    /// * `neuron: usize` - index of neuron. NOTE, neurons indexing in layer starts from 0!
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// # use neuroflow::FeedForward;
-    /// # let mut nn = FeedForward::new(&[1, 3, 2]);
-    /// nn.unbind(2, 0);
-    /// ```
-    pub fn unbind(&mut self, layer: usize, neuron: usize) {
-        self.layers[layer - 1].unbind(neuron);
-    }
-
     /// Train neural network by bulked data.
     ///
     /// * `data: &T` - the link on data that implements `neuroflow::data::Extractable` trait;
@@ -455,9 +359,9 @@ impl FeedForward {
     /// d.push(&[1.2], &[1.3, -0.2]);
     /// nn.train(&d, 30_000);
     /// ```
-    pub fn train<'a, F, const N: usize, const M: usize>(&mut self, rand: F, iterations: i64)
+    pub fn train<'a, F>(&mut self, rand: F, iterations: i64)
     where
-        F: Fn() -> ([f64; N], [f64; M]),
+        F: Fn() -> (&'a [f64], &'a [f64]),
     {
         for _ in 0..iterations {
             let (x, y) = rand();
@@ -510,186 +414,35 @@ impl FeedForward {
         self.forward(&x);
         &self.layers[self.layers.len() - 1].y
     }
-
-    /// Choose activation function. `Note` that if you pass `activators::Type::Custom`
-    /// as argument of this method, the default value (`activators::Type::Tanh`) will
-    /// be used.
-    ///
-    /// * `func: neuroflow::activators::Type` - enum element that indicates which
-    /// function to use;
-    /// * `return -> &mut FeedForward` - link on the current struct.
-    pub fn activation(&mut self, func: activators::Type) -> &mut FeedForward {
-        match func {
-            activators::Type::Sigmoid => {
-                self.act_type = activators::Type::Sigmoid;
-                self.act.func = activators::sigm;
-                self.act.der = activators::der_sigm;
-            }
-            activators::Type::Tanh | activators::Type::Custom => {
-                self.act_type = activators::Type::Tanh;
-                self.act.func = activators::tanh;
-                self.act.der = activators::der_tanh;
-            }
-            activators::Type::Relu => {
-                self.act_type = activators::Type::Relu;
-                self.act.func = activators::relu;
-                self.act.der = activators::der_relu;
-            }
-        }
-        self
-    }
-
-    /// Set custom activation function and its derivative.
-    /// Activation type is set to `activators::Type::Custom`.
-    ///
-    /// * `func: fn(f64) -> f64` - activation function to be set;
-    /// * `der: fn(f64) -> f64` - derivative of activation function;
-    /// * `return -> &mut FeedForward` - link on the current struct.
-    ///
-    /// # Warning
-    ///
-    /// Be careful using custom activation function. For good results this function
-    /// should be smooth, non-decreasing, and differentiable.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// # use neuroflow::FeedForward;
-    ///
-    /// fn sigmoid(x: f64) -> f64{
-    ///     1.0/(1.0 + x.exp())
-    /// }
-    ///
-    /// fn der_sigmoid(x: f64) -> f64{
-    ///     sigmoid(x)*(1.0 - sigmoid(x))
-    /// }
-    ///
-    /// let mut nn = FeedForward::new(&[1, 3, 2]);
-    /// nn.custom_activation(sigmoid, der_sigmoid);
-    /// ```
-    pub fn custom_activation(
-        &mut self,
-        func: fn(f64) -> f64,
-        der: fn(f64) -> f64,
-    ) -> &mut FeedForward {
-        self.act_type = activators::Type::Custom;
-
-        self.act.func = func;
-        self.act.der = der;
-
-        self
-    }
-
-    /// Set the learning rate of network.
-    ///
-    /// * `learning_rate: f64` - learning rate;
-    /// * `return -> &mut FeedForward` - link on the current struct.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// # use neuroflow::FeedForward;
-    /// # let mut nn = FeedForward::new(&[1, 3, 2]);
-    /// nn.learning_rate(0.1);
-    /// ```
-    pub fn learning_rate(&mut self, learning_rate: f64) -> &mut FeedForward {
-        self.learn_rate = learning_rate;
-        self
-    }
-
-    /// Set the momentum of network.
-    ///
-    /// * `momentum: f64` - momentum;
-    /// * `return -> &mut FeedForward` - link on the current struct.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// # use neuroflow::FeedForward;
-    /// # let mut nn = FeedForward::new(&[1, 3, 2]);
-    /// nn.momentum(0.05);
-    /// ```
-    pub fn momentum(&mut self, momentum: f64) -> &mut FeedForward {
-        self.momentum = momentum;
-        self
-    }
-
-    /// Get current training error
-    ///
-    /// * `return -> f64` - training error
-    pub fn get_error(&self) -> f64 {
-        self.error
-    }
 }
 
-impl Transform for FeedForward {
-    fn after(&mut self) {
-        match self.act_type {
-            activators::Type::Sigmoid => {
-                self.act_type = activators::Type::Sigmoid;
-                self.act.func = activators::sigm;
-                self.act.der = activators::der_sigm;
-            }
-            activators::Type::Tanh | activators::Type::Custom => {
-                self.act_type = activators::Type::Tanh;
-                self.act.func = activators::tanh;
-                self.act.der = activators::der_tanh;
-            }
-            activators::Type::Relu => {
-                self.act_type = activators::Type::Relu;
-                self.act.func = activators::relu;
-                self.act.der = activators::der_relu;
-            }
-        }
-    }
+/// Determine types of activation functions contained in this module.
+#[allow(dead_code)]
+#[derive(Serialize, Deserialize)]
+pub enum ActivatorType {
+    Sigmoid,
+    Tanh,
+    Relu
 }
 
-impl Default for ActivationContainer {
-    fn default() -> ActivationContainer {
-        ActivationContainer {
-            func: activators::tanh,
-            der: activators::der_tanh,
+impl ActivatorType {
+    pub fn func(&self, x: f64) -> f64 {
+        match self {
+            Self::Sigmoid => 1.0 / (1.0 + x.exp()),
+            Self::Tanh => x.tanh(),
+            Self::Relu => f64::max(0.0, x)
         }
     }
-}
 
-pub mod activators {
-    //! Module contains popular neural networks activation functions
-    //! and theirs derivatives
-
-    /// Determine types of activation functions contained in this module.
-    #[allow(dead_code)]
-    #[derive(Serialize, Deserialize)]
-    pub enum Type {
-        Sigmoid,
-        Tanh,
-        Relu,
-        Custom,
-    }
-
-    pub fn sigm(x: f64) -> f64 {
-        1.0 / (1.0 + x.exp())
-    }
-    pub fn der_sigm(x: f64) -> f64 {
-        sigm(x) * (1.0 - sigm(x))
-    }
-
-    pub fn tanh(x: f64) -> f64 {
-        x.tanh()
-    }
-
-    pub fn der_tanh(x: f64) -> f64 {
-        1.0 - x.tanh().powi(2)
-    }
-
-    pub fn relu(x: f64) -> f64 {
-        f64::max(0.0, x)
-    }
-    pub fn der_relu(x: f64) -> f64 {
-        if x <= 0.0 {
-            0.0
-        } else {
-            1.0
+    pub fn der(&self, x: f64) -> f64 {
+        match self {
+            Self::Sigmoid => self.func(x) * (1.0 - self.func(x)),
+            Self::Tanh => 1.0 - x.tanh().powi(2),
+            Self::Relu => if x <= 0.0 {
+                0.0
+            } else {
+                1.0
+            },
         }
     }
 }
