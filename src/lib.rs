@@ -201,9 +201,9 @@ pub struct FeedForward {
 }
 
 impl Layer {
-    fn new<F>(amount: i32, input: i32, rand: F) -> Layer
+    fn new<F>(amount: i32, input: i32, mut rand: F) -> Layer
     where
-        F: Fn() -> f32,
+        F: FnMut() -> f32,
     {
         let mut nl = Layer {
             v: Vec::new(),
@@ -247,9 +247,9 @@ impl FeedForward {
     /// let mut nn = FeedForward::new(&[1, 3, 2]);
     /// ```
     ///
-    pub fn new<F>(architecture: &[i32], rand: F) -> FeedForward
+    pub fn new<F>(architecture: &[i32], mut rand: F) -> FeedForward
     where
-        F: Fn() -> f32,
+        F: FnMut() -> f32,
     {
         let mut nn = FeedForward {
             learn_rate: 0.1,
@@ -261,7 +261,7 @@ impl FeedForward {
 
         for i in 1..architecture.len() {
             nn.layers
-                .push(Layer::new(architecture[i], architecture[i - 1], &rand))
+                .push(Layer::new(architecture[i], architecture[i - 1], &mut rand))
                 .unwrap();
         }
 
