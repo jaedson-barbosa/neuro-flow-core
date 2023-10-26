@@ -126,11 +126,11 @@ use serde::{Serialize, Deserialize};
 /// It is private and should not be used directly.
 #[derive(Serialize, Deserialize, Debug)]
 struct Layer {
-    v: Vec<f64, 32>,
-    y: Vec<f64, 32>,
-    delta: Vec<f64, 32>,
-    prev_delta: Vec<f64, 32>,
-    w: Vec<Vec<f64, 32>, 32>,
+    v: Vec<f32, 8>,
+    y: Vec<f32, 8>,
+    delta: Vec<f32, 8>,
+    prev_delta: Vec<f32, 8>,
+    w: Vec<Vec<f32, 8>, 8>,
 }
 
 /// Feed Forward (multilayer perceptron) neural network that is trained
@@ -188,22 +188,22 @@ struct Layer {
 /// ```rust
 /// # use neuroflow::FeedForward;
 /// # let mut nn = FeedForward::new(&[1, 3, 2]);
-/// let d: Vec<f64> = nn.calc(&[1.02]).to_vec();
+/// let d: Vec<f32> = nn.calc(&[1.02]).to_vec();
 /// ```
 ///
 #[derive(Serialize, Deserialize)]
 pub struct FeedForward {
-    layers: Vec<Layer, 32>,
-    pub learn_rate: f64,
-    pub momentum: f64,
-    pub error: f64,
+    layers: Vec<Layer, 8>,
+    pub learn_rate: f32,
+    pub momentum: f32,
+    pub error: f32,
     pub act_type: ActivatorType,
 }
 
 impl Layer {
     fn new<F>(amount: i32, input: i32, rand: F) -> Layer
     where
-        F: Fn() -> f64,
+        F: Fn() -> f32,
     {
         let mut nl = Layer {
             v: Vec::new(),
@@ -212,7 +212,7 @@ impl Layer {
             prev_delta: Vec::new(),
             w: Vec::new(),
         };
-        let mut v: Vec<f64, 32>;
+        let mut v;
         for _ in 0..amount {
             nl.y.push(0.0).unwrap();
             nl.delta.push(0.0).unwrap();
@@ -220,7 +220,7 @@ impl Layer {
 
             v = Vec::new();
             for _ in 0..input + 1 {
-                v.push(2f64 * rand() - 1f64).unwrap();
+                v.push(2f32 * rand() - 1f32).unwrap();
             }
 
             nl.w.push(v).unwrap();
@@ -249,7 +249,7 @@ impl FeedForward {
     ///
     pub fn new<F>(architecture: &[i32], rand: F) -> FeedForward
     where
-        F: Fn() -> f64,
+        F: Fn() -> f32,
     {
         let mut nn = FeedForward {
             learn_rate: 0.1,
@@ -268,15 +268,15 @@ impl FeedForward {
         return nn;
     }
 
-    fn forward(&mut self, x: &Vec<f64, 32>) {
-        let mut sum: f64;
+    fn forward(&mut self, x: &[f32]) {
+        let mut sum: f32;
 
         for j in 0..self.layers.len() {
             if j == 0 {
                 for i in 0..self.layers[j].v.len() {
-                    sum = 0.0;
+                    sum = self.layers[j].w[i][0];
                     for k in 0..x.len() {
-                        sum += self.layers[j].w[i][k] * x[k];
+                        sum += self.layers[j].w[i][k + 1] * x[k];
                     }
                     self.layers[j].v[i] = sum;
                     self.layers[j].y[i] = self.act_type.func(sum);
@@ -303,8 +303,8 @@ impl FeedForward {
         }
     }
 
-    fn backward(&mut self, d: &Vec<f64, 32>) {
-        let mut sum: f64;
+    fn backward(&mut self, d: &[f32]) {
+        let mut sum: f32;
 
         for j in (0..self.layers.len()).rev() {
             self.layers[j].prev_delta = self.layers[j].delta.clone();
@@ -328,7 +328,7 @@ impl FeedForward {
         }
     }
 
-    fn update(&mut self, x: &Vec<f64, 32>) {
+    fn update(&mut self, x: &[f32]) {
         for j in 0..self.layers.len() {
             for i in 0..self.layers[j].w.len() {
                 for k in 0..self.layers[j].w[i].len() {
@@ -365,57 +365,31 @@ impl FeedForward {
     /// ```
     pub fn train<'a, F>(&mut self, rand: F, iterations: i64)
     where
-        F: Fn() -> (&'a [f64], &'a [f64]),
+        F: Fn() -> (&'a [f32], &'a [f32]),
     {
         for _ in 0..iterations {
             let (x, y) = rand();
-            self.fit(&x, &y);
+            self.forward(&x);
+            self.backward(&y);
+            self.update(&x);
         }
-    }
-
-    /// Train neural network simultaneously step by step
-    ///
-    /// * `X: &[f64]` - slice of input data;
-    /// * `d: &[f64]` - expected output.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// # use neuroflow::FeedForward;
-    /// # let mut nn = FeedForward::new(&[1, 3, 2]);
-    /// nn.fit(&[3.0], &[3.0, 5.0]);
-    /// ```
-    #[allow(non_snake_case)]
-    pub fn fit(&mut self, X: &[f64], d: &[f64]) {
-        let mut x = Vec::from_slice(X).unwrap();
-        let res = Vec::from_slice(d).unwrap();
-
-        x.insert(0, 1f64).unwrap();
-
-        self.forward(&x);
-        self.backward(&res);
-        self.update(&x);
     }
 
     /// Calculate the response by trained neural network.
     ///
-    /// * `X: &[f64]` - slice of input data;
-    /// * `return -> &[f64]` - slice of calculated data.
+    /// * `X: &[f32]` - slice of input data;
+    /// * `return -> &[f32]` - slice of calculated data.
     ///
     /// # Examples
     ///
     /// ```rust
     /// # use neuroflow::FeedForward;
     /// # let mut nn = FeedForward::new(&[1, 3, 2]);
-    /// let v: Vec<f64> = nn.calc(&[1.02]).to_vec();
+    /// let v: &[f32] = nn.calc(&[1.02]).to_vec();
     /// ```
     #[allow(non_snake_case)]
-    pub fn calc(&mut self, X: &[f64]) -> &[f64] {
-        let mut x = Vec::from_slice(X).unwrap();
-
-        x.insert(0, 1f64).unwrap();
-
-        self.forward(&x);
+    pub fn calc(&mut self, x: &[f32]) -> &[f32] {
+        self.forward(x);
         &self.layers[self.layers.len() - 1].y
     }
 }
@@ -430,15 +404,15 @@ pub enum ActivatorType {
 }
 
 impl ActivatorType {
-    pub fn func(&self, x: f64) -> f64 {
+    pub fn func(&self, x: f32) -> f32 {
         match self {
-            Self::Sigmoid => 1.0 / (1.0 + libm::exp(x)),
-            Self::Tanh => libm::tanh(x),
-            Self::Relu => f64::max(0.0, x),
+            Self::Sigmoid => 1.0 / (1.0 + libm::expf(x)),
+            Self::Tanh => libm::tanhf(x),
+            Self::Relu => f32::max(0.0, x),
         }
     }
 
-    pub fn der(&self, x: f64) -> f64 {
+    pub fn der(&self, x: f32) -> f32 {
         match self {
             Self::Sigmoid => self.func(x) * (1.0 - self.func(x)),
             Self::Tanh => {
@@ -464,13 +438,13 @@ pub mod estimators {
     /// For network architecture [2, 1] and allowed error 0.1 (10%)
     /// the size of training sample must exceed the amount of free
     /// network parameters in 10 times
-    pub fn widrows(architecture: &[i32], allowed_error: f64) -> f64 {
+    pub fn widrows(architecture: &[i32], allowed_error: f32) -> f32 {
         let mut s = architecture[0] * (architecture[0] + 1);
 
         for i in 1..architecture.len() {
             s += architecture[i] * architecture[i - 1] + architecture[i];
         }
 
-        (s as f64) / allowed_error
+        (s as f32) / allowed_error
     }
 }
