@@ -120,7 +120,7 @@ extern crate heapless;
 extern crate serde;
 
 use heapless::Vec;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 /// Struct `Layer` represents single layer of network.
 /// It is private and should not be used directly.
@@ -333,7 +333,9 @@ impl FeedForward {
             for i in 0..self.layers[j].w.len() {
                 for k in 0..self.layers[j].w[i].len() {
                     if j == 0 {
-                        self.layers[j].w[i][k] += self.learn_rate * self.layers[j].delta[i] * x[k];
+                        self.layers[j].w[i][k] += self.learn_rate
+                            * self.layers[j].delta[i]
+                            * if k == 0 { 1.0 } else { x[k - 1] };
                     } else {
                         if k == 0 {
                             self.layers[j].w[i][k] += self.learn_rate * self.layers[j].delta[i];
