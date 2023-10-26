@@ -124,7 +124,7 @@ use serde::{Deserialize, Serialize};
 
 /// Struct `Layer` represents single layer of network.
 /// It is private and should not be used directly.
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
 struct Layer {
     v: Vec<f32, 8>,
     y: Vec<f32, 8>,
@@ -191,12 +191,11 @@ struct Layer {
 /// let d: Vec<f32> = nn.calc(&[1.02]).to_vec();
 /// ```
 ///
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, PartialEq, Debug)]
 pub struct FeedForward {
     layers: Vec<Layer, 8>,
     pub learn_rate: f32,
     pub momentum: f32,
-    pub error: f32,
     pub act_type: ActivatorType,
 }
 
@@ -254,7 +253,6 @@ impl FeedForward {
         let mut nn = FeedForward {
             learn_rate: 0.1,
             momentum: 0.1,
-            error: 0.0,
             layers: Vec::new(),
             act_type: ActivatorType::Tanh,
         };
@@ -304,21 +302,16 @@ impl FeedForward {
     }
 
     fn backward(&mut self, d: &[f32]) {
-        let mut sum: f32;
-
         for j in (0..self.layers.len()).rev() {
             self.layers[j].prev_delta = self.layers[j].delta.clone();
             if j == self.layers.len() - 1 {
-                self.error = 0.0;
                 for i in 0..self.layers[j].y.len() {
                     self.layers[j].delta[i] =
                         (d[i] - self.layers[j].y[i]) * self.act_type.der(self.layers[j].v[i]);
-                    let temp = d[i] - self.layers[j].y[i];
-                    self.error += 0.5 * temp * temp;
                 }
             } else {
                 for i in 0..self.layers[j].delta.len() {
-                    sum = 0.0;
+                    let mut sum = 0.0;
                     for k in 0..self.layers[j + 1].delta.len() {
                         sum += self.layers[j + 1].delta[k] * self.layers[j + 1].w[k][i + 1];
                     }
@@ -398,7 +391,7 @@ impl FeedForward {
 
 /// Determine types of activation functions contained in this module.
 #[allow(dead_code)]
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, PartialEq, Debug)]
 pub enum ActivatorType {
     Sigmoid,
     Tanh,
@@ -448,5 +441,21 @@ pub mod estimators {
         }
 
         (s as f32) / allowed_error
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    extern crate postcard;
+    extern crate rand;
+
+    use super::*;
+
+    #[test]
+    fn postcard_storage() {
+        let nn = FeedForward::new(&[4, 3, 2, 1], || rand::random::<f32>());
+        let str = postcard::to_vec::<_, 1024>(&nn).unwrap();
+        let nn_1 = postcard::from_bytes::<FeedForward>(&str).unwrap();
+        assert_eq!(nn_1, nn);
     }
 }
