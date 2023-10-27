@@ -344,30 +344,23 @@ impl FeedForward {
         }
     }
 
-    /// Train neural network by bulked data.
+    /// Train neural network simultaneously step by step
     ///
-    /// * `data: &T` - the link on data that implements `neuroflow::data::Extractable` trait;
-    /// * `iterations: i64` - iterations count.
+    /// * `X: &[f64]` - slice of input data;
+    /// * `d: &[f64]` - expected output.
     ///
     /// # Examples
     ///
     /// ```rust
     /// # use neuroflow::FeedForward;
     /// # let mut nn = FeedForward::new(&[1, 3, 2]);
-    /// let mut d = neuroflow::data::DataSet::new();
-    /// d.push(&[1.2], &[1.3, -0.2]);
-    /// nn.train(&d, 30_000);
+    /// nn.fit(&[3.0], &[3.0, 5.0]);
     /// ```
-    pub fn train<'a, F>(&mut self, rand: F, iterations: i64)
-    where
-        F: Fn() -> (&'a [f32], &'a [f32]),
-    {
-        for _ in 0..iterations {
-            let (x, y) = rand();
-            self.forward(&x);
-            self.backward(&y);
-            self.update(&x);
-        }
+    #[allow(non_snake_case)]
+    pub fn fit(&mut self, x: &[f32], y: &[f32]) {
+        self.forward(&x);
+        self.backward(&y);
+        self.update(&x);
     }
 
     /// Calculate the response by trained neural network.
