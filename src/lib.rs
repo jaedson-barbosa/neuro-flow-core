@@ -448,6 +448,7 @@ pub mod estimators {
 mod tests {
     extern crate postcard;
     extern crate rand;
+    extern crate std;
 
     use super::*;
 
@@ -455,7 +456,16 @@ mod tests {
     fn postcard_storage() {
         let nn = FeedForward::new(&[4, 3, 2, 1], || rand::random::<f32>());
         let str = postcard::to_vec::<_, 1024>(&nn).unwrap();
+        std::fs::write("model", &str).unwrap();
+        let str = std::fs::read("model").unwrap();
         let nn_1 = postcard::from_bytes::<FeedForward>(&str).unwrap();
         assert_eq!(nn_1, nn);
+    }
+
+    #[test]
+    fn included() {
+        let str = include_bytes!("../model");
+        let nn_1 = postcard::from_bytes::<FeedForward>(str).unwrap();
+        assert_eq!(nn_1.act_type, ActivatorType::Tanh);
     }
 }
