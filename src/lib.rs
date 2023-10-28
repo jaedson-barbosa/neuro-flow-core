@@ -116,21 +116,21 @@
 
 #![no_std]
 
-extern crate heapless;
+extern crate alloc;
 extern crate serde;
 
-use heapless::Vec;
+use alloc::vec::Vec;
 use serde::{Deserialize, Serialize};
 
 /// Struct `Layer` represents single layer of network.
 /// It is private and should not be used directly.
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 struct Layer {
-    v: Vec<f32, 8>,
-    y: Vec<f32, 8>,
-    delta: Vec<f32, 8>,
-    prev_delta: Vec<f32, 8>,
-    w: Vec<Vec<f32, 8>, 8>,
+    v: Vec<f32>,
+    y: Vec<f32>,
+    delta: Vec<f32>,
+    prev_delta: Vec<f32>,
+    w: Vec<Vec<f32>>,
 }
 
 /// Feed Forward (multilayer perceptron) neural network that is trained
@@ -193,7 +193,7 @@ struct Layer {
 ///
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
 pub struct FeedForward {
-    layers: Vec<Layer, 8>,
+    layers: Vec<Layer>,
     pub learn_rate: f32,
     pub momentum: f32,
     pub act_type: ActivatorType,
@@ -213,16 +213,16 @@ impl Layer {
         };
         let mut v;
         for _ in 0..amount {
-            nl.y.push(0.0).unwrap();
-            nl.delta.push(0.0).unwrap();
-            nl.v.push(0.0).unwrap();
+            nl.y.push(0.0);
+            nl.delta.push(0.0);
+            nl.v.push(0.0);
 
             v = Vec::new();
             for _ in 0..input + 1 {
-                v.push(2f32 * rand() - 1f32).unwrap();
+                v.push(2f32 * rand() - 1f32);
             }
 
-            nl.w.push(v).unwrap();
+            nl.w.push(v);
         }
         return nl;
     }
@@ -246,7 +246,7 @@ impl FeedForward {
     /// let mut nn = FeedForward::new(&[1, 3, 2]);
     /// ```
     ///
-    pub fn new<F>(architecture: &[i32], mut rand: F) -> FeedForward
+    pub fn new<F>(architecture: &[i32], mut rand: F) -> Self
     where
         F: FnMut() -> f32,
     {
@@ -259,8 +259,7 @@ impl FeedForward {
 
         for i in 1..architecture.len() {
             nn.layers
-                .push(Layer::new(architecture[i], architecture[i - 1], &mut rand))
-                .unwrap();
+                .push(Layer::new(architecture[i], architecture[i - 1], &mut rand));
         }
 
         return nn;
@@ -458,7 +457,8 @@ mod tests {
     #[test]
     fn included() {
         let str = include_bytes!("../model");
-        let nn_1 = postcard::from_bytes::<FeedForward>(str).unwrap();
+        let mut nn_1 = postcard::from_bytes::<FeedForward>(str).unwrap();
+        nn_1.calc(&[0.0, 0.9, 0.44]);
         assert_eq!(nn_1.act_type, ActivatorType::Tanh);
     }
 }
